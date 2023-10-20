@@ -63,12 +63,6 @@ void main( void )
 }
 `;
 
-var basicFragShader =
-`void mainImage( out vec4 fragColor, in vec2 fragCoord ) {
-    fragColor = texture2D(iChannel0, gl_FragCoord.xy / iResolution.xy);
-}
-`;
-
 const basicVertexShader = 
 `#version 300 es
 #ifdef GL_ES
