@@ -13,6 +13,7 @@
 
 ## Features
 - direcly load *almost* any ShaderToy shaders
+- all uniforms
 - multipass shaders (i.e BufferA, BufferB, BufferC, BufferD)
 - shader common code (i.e. 'Common' tab in ShaderToy)
 - update shaders at any time
