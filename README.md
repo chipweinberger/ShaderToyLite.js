@@ -24,7 +24,7 @@
 
 ## Usage
 
-```
+```javascript
 // initialize
 var toy = new ShaderToyLite('myCanvas');
 
