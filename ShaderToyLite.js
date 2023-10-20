@@ -385,6 +385,12 @@ function ShaderToyLite(canvasId) {
     this.setOnDraw = (callback) => {
         onDrawCallback = callback;
     }
+
+    this.addTexture = (texture, key) => {
+        atexture[key] = texture;
+        btexture[key] = texture;
+        flip[key] = false;
+    }
     
     this.getTime = () => {
         return (prevDrawTime - firstDrawTime) * 0.001;

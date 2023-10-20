@@ -15,7 +15,8 @@
 - direcly load *almost* any ShaderToy shaders
 - pixel perfect rendering
 - supports all uniforms
-- multipass shaders (i.e BufferA, BufferB, BufferC, BufferD)
+- upload your own textures
+- shader buffers (i.e BufferA, BufferB, BufferC, BufferD)
 - shader common code (i.e. 'Common' tab in ShaderToy)
 - update shaders at any time
 - uses the same texture format as ShaderToy (RGBA float32)
@@ -31,12 +32,15 @@
 // initialize
 var toy = new ShaderToyLite('myCanvas');
 
+// add webgl textures (optional)
+toy.addTexture(texture, 'rock');
+
 // set shaders
 toy.setCommon("");
-toy.setBufferA({source: bufferA});
+toy.setBufferA({source: bufferA, iChannel0: 'rock'});
 toy.setImage({source: image, iChannel0: 'A'});
 
-// optional callback
+// draw callback (optional)
 toy.setOnDraw((){
     console.log(toy.getTime());
 })
