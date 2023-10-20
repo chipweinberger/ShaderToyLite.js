@@ -55,7 +55,7 @@ toy.rewind();
 
 Minimal example showing multiple buffer usage.
 
-```
+```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
