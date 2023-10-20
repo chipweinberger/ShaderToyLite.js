@@ -53,6 +53,8 @@ toy.rewind();
 
 ## Minimal Example
 
+Minimal example showing multiple buffer usage.
+
 ```
 <!DOCTYPE html>
 <html lang="en">
