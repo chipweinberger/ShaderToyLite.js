@@ -81,7 +81,7 @@ Minimal example showing multiple buffer usage.
     `;
     var toy = new ShaderToy('myCanvas');
     toy.setCommon('');
-    toy.setBufferA({source: a, iChannel0: 'B'});
+    toy.setBufferA({source: a});
     toy.setImage({source: image, iChannel0: 'A'});
     toy.play();
     </script>
