@@ -296,7 +296,7 @@ function ShaderToyLite(canvasId) {
                 for (let i = 0; i < 4; i++) {
                     var chkey = ichannels[key][i];
                     if (chkey) {
-                        var input = flip[key] ? atexture[chkey] : btexture[chkey];
+                        var input = flip[chkey] ? atexture[chkey] : btexture[chkey];
                         gl.activeTexture(gl[`TEXTURE${i}`]);
                         gl.bindTexture(gl.TEXTURE_2D, input);
                     }
