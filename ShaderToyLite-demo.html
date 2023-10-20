@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ShaderToyLite</title>
+</head>
+<body>
+<style>
+body, html {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
+#myCanvas {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+}
+</style>
+<canvas id="myCanvas" width="840" height="472"></canvas>
+</body>
+<script>
+////////////////////////////////////////////////////////////
+// ██████   ███████  ███    ██  ██████   ███████  ██████  
+// ██   ██  ██       ████   ██  ██   ██  ██       ██   ██ 
+// ██████   █████    ██ ██  ██  ██   ██  █████    ██████  
+// ██   ██  ██       ██  ██ ██  ██   ██  ██       ██   ██ 
+// ██   ██  ███████  ██   ████  ██████   ███████  ██   ██ 
+                                                 
+function ShaderToyLite(canvasId) {
+
+var hdr = 
+`#version 300 es
+#ifdef GL_ES
+precision highp float;
+precision highp int;
+precision mediump sampler3D;
+#endif
+#define texture2D texture
+uniform vec3      iResolution;           // viewport resolution (in pixels)
+uniform float     iTime;                 // shader playback time (in seconds)
+uniform float     iTimeDelta;            // render time (in seconds)
+uniform float     iFrameRate;            // shader frame rate
+uniform int       iFrame;                // shader playback frame
+uniform float     iChannelTime[4];       // channel playback time (in seconds)
+uniform vec3      iChannelResolution[4]; // channel resolution (in pixels)
+uniform vec4      iMouse;                // mouse pixel coords. xy: current (if MLB down), zw: click
+uniform sampler2D iChannel0;             // input channel 0
+uniform sampler2D iChannel1;             // input channel 1
+uniform sampler2D iChannel2;             // input channel 2
+uniform sampler2D iChannel3;             // input channel 3
+uniform vec4      iDate;                 // (year, month, day, unixtime in seconds)
+uniform float     iSampleRate;           // sound sample rate (i.e., 44100)
+out vec4          frag_out_color;
+void mainImage( out vec4 c, in vec2 f );
+void main( void )
+{
+    vec4 color = vec4(0.0,0.0,0.0,0.0);
+    mainImage( color, gl_FragCoord.xy );
+    frag_out_color = vec4(color);
+}
+`;
+
+var basicFragShader =
+`void mainImage( out vec4 fragColor, in vec2 fragCoord ) {
+    fragColor = texture2D(iChannel0, gl_FragCoord.xy / iResolution.xy);
+}
+`;
+
+const basicVertexShader = 
+`#version 300 es
+#ifdef GL_ES
+precision highp float;
+precision highp int;
+precision mediump sampler3D;
+#endif
+in vec2 vertexInPosition;
+void main() {
+    gl_Position = vec4(vertexInPosition, 0.0, 1.0);
+}
+`;
+
+const quadVertices = new Float32Array([
+    -1.0, -1.0,
+    1.0, -1.0,
+    -1.0,  1.0,
+    1.0,  1.0,
+    -1.0,  1.0,
+    1.0, -1.0
+]);
+
+
+var opts = { alpha: false, 
+             depth: false, 
+             stencil: false, 
+             premultipliedAlpha: false, 
+             antialias: true, 
+             preserveDrawingBuffer: false, 
+             powerPreference: "high-performance" }; 
+
+var gl = document.getElementById(canvasId).getContext('webgl2', opts); 
+
+// timing
+var isPlaying = false;
+var firstDrawTime = 0;
+var prevDrawTime = 0;
+
+// callback
+var onDrawCallback;
+
+// uniforms
+var iFrame = 0;
+var iMouse = {x: 0, y: 0, clickX: 0, clickY: 0};
+
+// shader common source 
+var common = "";
+
+// render passes variables. valid keys:
+//   'A', 'B', 'C', 'D', 'Image' 
+var sourcecode = {};// fragment shader code
+var ichannels = {}; // texture inputs
+var atexture = {};  // front texture (input/output)
+var btexture = {};  // back texture  (input/output)
+var aframebuf = {}; // front buffer (output)
+var bframebuf = {}; // back buffer (output)
+var program = {};   // webgl program
+var location = {}; // uniform location
+var flip = {};      // a b flip
+
+var setup = () => {
+    gl.getExtension( 'OES_texture_float_linear');
+    gl.getExtension( 'OES_texture_half_float_linear');
+    gl.getExtension( 'EXT_color_buffer_float');
+    gl.getExtension( 'WEBGL_debug_shaders');
+
+    ['A', 'B', 'C', 'D', 'Image'].forEach((key) => {
+        sourcecode[key] = "";
+        ichannels[key] = {};
+        program[key] = null;
+        location[key] = {};
+        if (key != 'Image') {
+            atexture[key] = createTexture();
+            btexture[key] = createTexture();
+            aframebuf[key] = createFrameBuffer(atexture[key]);
+            bframebuf[key] = createFrameBuffer(btexture[key]);
+            flip[key] = false;
+        }
+    });
+
+    // bind the geometry
+    quadBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, quadVertices, gl.STATIC_DRAW);
+    
+    // Set viewport size
+    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+
+    var canvas = document.getElementById(canvasId);
+
+    window.addEventListener('resize', function() {
+        gl.canvas.width = canvas.width;
+        gl.canvas.height = canvas.height;
+        gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+    });
+
+    canvas.addEventListener("mousemove", (event) => {
+        iMouse.x = event.offsetX;
+        iMouse.y = canvas.height - event.offsetY;
+    });
+
+    canvas.addEventListener("mousedown", (event) => {
+        iMouse.clickX = event.offsetX;
+        iMouse.clickY = canvas.height - event.offsetY;
+    });
+
+    canvas.addEventListener("mouseup", () => {
+        iMouse.clickX = 0;
+        iMouse.clickY = 0;
+    });
+}
+
+var createTexture = () => {
+    var texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, gl.canvas.width, gl.canvas.height, 0, gl.RGBA, gl.FLOAT, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return texture;
+}
+
+var createFrameBuffer = (texture) => {
+    var framebuffer = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return framebuffer;
+};
+
+var compileProgram = (key) => {
+    var vert = gl.createShader(gl.VERTEX_SHADER);
+    gl.shaderSource(vert, basicVertexShader);
+    gl.compileShader(vert);
+
+    if (!gl.getShaderParameter(vert, gl.COMPILE_STATUS)) {
+        console.error('Vertex Shader compilation failed: ' + gl.getShaderInfoLog(vert));
+        gl.deleteShader(vert);
+        return null;
+    }
+
+    var source = hdr + common + sourcecode[key];
+    var frag = gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(frag, source);
+    gl.compileShader(frag);
+
+    if (!gl.getShaderParameter(frag, gl.COMPILE_STATUS)) {
+        console.error('Fragment Shader compilation failed: ' + gl.getShaderInfoLog(frag));
+        console.error(source);
+        gl.deleteShader(frag);
+        return null;
+    }
+
+    var program = gl.createProgram();
+    gl.attachShader(program, vert);
+    gl.attachShader(program, frag);
+    gl.linkProgram(program);
+
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        console.error('Program initialization failed: ' + gl.getProgramInfoLog(program));
+        return null;
+    }
+
+    // uniform locations
+    location[key]["iResolution"]        = gl.getUniformLocation(program, "iResolution");
+    location[key]["iTime"]              = gl.getUniformLocation(program, "iTime");
+    location[key]["iTimeDelta"]         = gl.getUniformLocation(program, "iTimeDelta");
+    location[key]["iFrameRate"]         = gl.getUniformLocation(program, "iFrameRate");
+    location[key]["iFrame"]             = gl.getUniformLocation(program, "iFrame");
+    location[key]["iChannelTime"]       = gl.getUniformLocation(program, "iChannelTime[0]");
+    location[key]["iChannelResolution"] = gl.getUniformLocation(program, "iChannelResolution[0]");
+    location[key]["iChannel0"]          = gl.getUniformLocation(program, "iChannel0");
+    location[key]["iChannel1"]          = gl.getUniformLocation(program, "iChannel1");
+    location[key]["iChannel2"]          = gl.getUniformLocation(program, "iChannel2");
+    location[key]["iChannel3"]          = gl.getUniformLocation(program, "iChannel3");
+    location[key]["iMouse"]             = gl.getUniformLocation(program, "iMouse");
+    location[key]["iDate"]              = gl.getUniformLocation(program, "iDate");
+    location[key]["iSampleRate"]        = gl.getUniformLocation(program, "iSampleRate");
+    location[key]["vertexInPosition"]   = gl.getAttribLocation(program, "vertexInPosition");
+
+    return program;
+};
+
+var repeat = (times, arr) => {
+    let result = [];
+    for (let i = 0; i < times; i++) {
+        result = [...result, ...arr];
+    }
+    return result;
+}
+
+var setShader = (config, key) => {
+    if (config) {
+        if (config.source) {
+            sourcecode[key] = config.source;
+            program[key] = compileProgram(key);
+            if (program[key] == null) {
+                console.error("Failed to compile " + key);
+            }
+        }
+        for (let i = 0; i < 4; i++) {
+            var s = config[`iChannel${i}`];
+            if (s == "A" || s == "B" || s == "C" || s == "D") {
+                ichannels[key][i] = s;
+            }
+        }
+    } else {
+        sourcecode[key] = "";
+        program[key] = null;
+    }
+};
+
+var draw = () => {
+
+    // current time
+    var now = isPlaying ? Date.now() : prevDrawTime;
+    var date = new Date(now);
+
+    // first draw?
+    if (firstDrawTime == 0) {
+        firstDrawTime = now;
+    }
+
+    // call callback
+    if (onDrawCallback) {
+        onDrawCallback();
+    }
+
+    // time difference between frames in seconds
+    var iTimeDelta = (now - prevDrawTime) * 0.001;
+
+    // time in seconds
+    var iTime = (now - firstDrawTime) * 0.001;
+    var iDate = [date.getFullYear(), date.getMonth(), date.getDate(), date.getTime() * 0.001];
+
+    // channel uniforms
+    var iChannelTimes = new Float32Array(repeat(4, [iTime]));
+    var iChannelResolutions = new Float32Array(repeat(4, [gl.canvas.width, gl.canvas.height, 0]));
+
+    ['A', 'B', 'C', 'D', 'Image'].forEach((key) => {
+
+        if (program[key]) {
+
+            // framebuffer
+            if (key === "Image") {
+                gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            } else {
+                var output = flip[key] ? bframebuf[key] : aframebuf[key];
+                gl.bindFramebuffer(gl.FRAMEBUFFER, output);
+            }
+
+            // textures
+            for (let i = 0; i < 4; i++) {
+                var chkey = ichannels[key][i];
+                if (chkey) {
+                    var input = flip[key] ? atexture[chkey] : btexture[chkey];
+                    gl.activeTexture(gl[`TEXTURE${i}`]);
+                    gl.bindTexture(gl.TEXTURE_2D, input);
+                }
+            }
+
+            // program
+            gl.useProgram(program[key]);
+
+            // uniforms
+            gl.uniform3f( location[key]["iResolution"], gl.canvas.width, gl.canvas.height, 1.0);
+            gl.uniform1f( location[key]["iTime"], iTime);
+            gl.uniform1f( location[key]["iTimeDelta"], iTimeDelta);
+            gl.uniform1f( location[key]["iFrameRate"], 60);
+            gl.uniform1i( location[key]["iFrame"], iFrame);
+            gl.uniform1fv(location[key]["iChannelTime"], iChannelTimes);
+            gl.uniform3fv(location[key]["iChannelResolution"], iChannelResolutions);
+            gl.uniform1i( location[key]["iChannel0"], 0);
+            gl.uniform1i( location[key]["iChannel1"], 1);
+            gl.uniform1i( location[key]["iChannel2"], 2);
+            gl.uniform1i( location[key]["iChannel3"], 3);
+            gl.uniform4f( location[key]["iMouse"], iMouse.x, iMouse.y, iMouse.clickX, iMouse.clickY);
+            gl.uniform4f( location[key]["iDate"], iDate[0], iDate[1], iDate[2], iDate[3]);
+            gl.uniform1f( location[key]["iSampleRate"], 44100);
+
+            // viewport
+            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+        
+            // vertexs
+            gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+            gl.vertexAttribPointer(location[key]["vertexInPosition"], 2, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(location[key]["vertexInPosition"]);
+
+            // draw
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+            flip[key] = !flip[key];
+        }
+    });
+
+    // time of last draw
+    prevDrawTime = now;
+
+    // frame counter
+    iFrame++;
+};
+
+// Animation loop
+var animate = () => {
+    if (isPlaying) {
+        draw();
+        requestAnimationFrame(animate);
+    }
+};
+
+this.setCommon = (source) => {
+    if (source === undefined) {source = "";}
+    if (source === null) {source = "";}
+    common = source;
+    ['A', 'B', 'C', 'D', 'Image'].forEach((key) => {
+        if (program[key]) {
+            program[key] = compileProgram(key);
+        }
+    });
+};
+
+this.setBufferA = (config) => {
+    setShader(config, 'A');
+};
+
+this.setBufferB = (config) => {
+    setShader(config, 'B');
+};
+
+this.setBufferC = (config) => {
+    setShader(config, 'C');
+};
+
+this.setBufferD = (config) => {
+    setShader(config, 'D');
+};
+
+this.setImage = (config) => {
+    setShader(config, 'Image');
+};
+
+this.setOnDraw = (callback) => {
+    onDrawCallback = callback;
+}
+
+this.getTime = () => {
+    return (prevDrawTime - firstDrawTime) * 0.001;
+}
+
+this.getIsPlaying = () => isPlaying;
+
+this.reset = () => {
+    var now = new Date();
+    firstDrawTime = now;
+    prevDrawTime = now;
+    iFrame = 0;
+    draw();
+}
+
+this.pause = () => {
+    isPlaying = false;
+}
+
+this.play = () => {
+    if (!isPlaying) {
+        isPlaying = true;
+        var now = Date.now();
+        var elapsed = prevDrawTime - firstDrawTime;
+        firstDrawTime = now - elapsed;
+        prevDrawTime = now;
+        animate();
+    }
+}
+
+setup();
+}
+</script>
+<!------------------------------------------------------------------->
+<!-- ██████   ██████   ███    ███  ███    ███   ██████   ███    ██ --> 
+<!--██       ██    ██  ████  ████  ████  ████  ██    ██  ████   ██ --> 
+<!--██       ██    ██  ██ ████ ██  ██ ████ ██  ██    ██  ██ ██  ██ --> 
+<!--██       ██    ██  ██  ██  ██  ██  ██  ██  ██    ██  ██  ██ ██ --> 
+<!-- ██████   ██████   ██      ██  ██      ██   ██████   ██   ████ --> 
+<!------------------------------------------------------------------->
+<script id="Common" type="x-shader/x-fragment">
+#define Bf(p) p
+#define Bi(p) ivec2(p)
+#define texel(a, p) texelFetch(a, Bi(p), 0)
+#define pixel(a, p) texture(a, (p)/R)
+#define ch0 iChannel0
+#define ch1 iChannel1
+#define ch2 iChannel2
+#define ch3 iChannel3
+
+#define PI 3.14159265
+
+#define loop(i,x) for(int i = 0; i < x; i++)
+#define range(i,a,b) for(int i = a; i <= b; i++)
+
+#define dt 1.5
+
+#define border_h 5.
+vec2 R;
+vec4 Mouse;
+float time;
+
+#define mass 1.
+
+#define fluid_rho 0.5
+
+float Pf(vec2 rho)
+{
+    //return 0.2*rho.x; //gas
+    float GF = 1.;//smoothstep(0.49, 0.5, 1. - rho.y);
+    return mix(0.5*rho.x,0.04*rho.x*(rho.x/fluid_rho - 1.), GF); //water pressure
+}
+
+mat2 Rot(float ang)
+{
+    return mat2(cos(ang), -sin(ang), sin(ang), cos(ang)); 
+}
+
+vec2 Dir(float ang)
+{
+    return vec2(cos(ang), sin(ang));
+}
+
+
+float sdBox( in vec2 p, in vec2 b )
+{
+    vec2 d = abs(p)-b;
+    return length(max(d,0.0)) + min(max(d.x,d.y),0.0);
+}
+
+float border(vec2 p)
+{
+    float bound = -sdBox(p - R*0.5, R*vec2(0.5, 0.5)); 
+    float box = sdBox(Rot(0.*time)*(p - R*vec2(0.5, 0.6)) , R*vec2(0.05, 0.01));
+    float drain = -sdBox(p - R*vec2(0.5, 0.7), R*vec2(1.5, 0.5));
+    return max(drain,min(bound, box));
+}
+
+#define h 1.
+vec3 bN(vec2 p)
+{
+    vec3 dx = vec3(-h,0,h);
+    vec4 idx = vec4(-1./h, 0., 1./h, 0.25);
+    vec3 r = idx.zyw*border(p + dx.zy)
+            + idx.xyw*border(p + dx.xy)
+            + idx.yzw*border(p + dx.yz)
+            + idx.yxw*border(p + dx.yx);
+    return vec3(normalize(r.xy), r.z + 1e-4);
+}
+
+uint pack(vec2 x)
+{
+    x = 65534.0*clamp(0.5*x+0.5, 0., 1.);
+    return uint(round(x.x)) + 65535u*uint(round(x.y));
+}
+
+vec2 unpack(uint a)
+{
+    vec2 x = vec2(a%65535u, a/65535u);
+    return clamp(x/65534.0, 0.,1.)*2.0 - 1.0;
+}
+
+vec2 decode(float x)
+{
+    uint X = floatBitsToUint(x);
+    return unpack(X); 
+}
+
+float encode(vec2 x)
+{
+    uint X = pack(x);
+    return uintBitsToFloat(X); 
+}
+
+struct particle
+{
+    vec2 X;
+    vec2 V;
+    vec2 M;
+};
+    
+particle getParticle(vec4 data, vec2 pos)
+{
+    particle P; 
+    P.X = decode(data.x) + pos;
+    P.V = decode(data.y);
+    P.M = data.zw;
+    return P;
+}
+
+vec4 saveParticle(particle P, vec2 pos)
+{
+    P.X = clamp(P.X - pos, vec2(-0.5), vec2(0.5));
+    return vec4(encode(P.X), encode(P.V), P.M);
+}
+
+vec3 hash32(vec2 p)
+{
+    vec3 p3 = fract(vec3(p.xyx) * vec3(.1031, .1030, .0973));
+    p3 += dot(p3, p3.yxz+33.33);
+    return fract((p3.xxy+p3.yzz)*p3.zyx);
+}
+
+float G(vec2 x)
+{
+    return exp(-dot(x,x));
+}
+
+float G0(vec2 x)
+{
+    return exp(-length(x));
+}
+
+//diffusion amount
+#define dif 1.12
+
+vec3 distribution(vec2 x, vec2 p, float K)
+{
+    vec2 omin = clamp(x - K*0.5, p - 0.5, p + 0.5);
+    vec2 omax = clamp(x + K*0.5, p - 0.5, p + 0.5); 
+    return vec3(0.5*(omin + omax), (omax.x - omin.x)*(omax.y - omin.y)/(K*K));
+}
+
+//diffusion and advection basically
+void Reintegration(sampler2D ch, inout particle P, vec2 pos)
+{
+    //basically integral over all updated neighbor distributions
+    //that fall inside of this pixel
+    //this makes the tracking conservative
+    range(i, -2, 2) range(j, -2, 2)
+    {
+        vec2 tpos = pos + vec2(i,j);
+        vec4 data = texel(ch, tpos);
+        
+        particle P0 = getParticle(data, tpos);
+        
+        P0.X += P0.V*dt; //integrate position
+
+        float difR = 0.9 + 0.21*smoothstep(fluid_rho*0., fluid_rho*0.333, P0.M.x);
+        vec3 D = distribution(P0.X, pos, difR);
+        //the deposited mass into this cell
+        float m = P0.M.x*D.z;
+        
+        //add weighted by mass
+        P.X += D.xy*m;
+        P.V += P0.V*m;
+        P.M.y += P0.M.y*m;
+        
+        //add mass
+        P.M.x += m;
+    }
+    
+    //normalization
+    if(P.M.x != 0.)
+    {
+        P.X /= P.M.x;
+        P.V /= P.M.x;
+        P.M.y /= P.M.x;
+    }
+}
+
+//force calculation and integration
+void Simulation(sampler2D ch, inout particle P, vec2 pos)
+{
+    //Compute the SPH force
+    vec2 F = vec2(0.);
+    vec3 avgV = vec3(0.);
+    range(i, -2, 2) range(j, -2, 2)
+    {
+        vec2 tpos = pos + vec2(i,j);
+        vec4 data = texel(ch, tpos);
+        particle P0 = getParticle(data, tpos);
+        vec2 dx = P0.X - P.X;
+        float avgP = 0.5*P0.M.x*(Pf(P.M) + Pf(P0.M)); 
+        F -= 0.5*G(1.*dx)*avgP*dx;
+        avgV += P0.M.x*G(1.*dx)*vec3(P0.V,1.);
+    }
+    avgV.xy /= avgV.z;
+
+    //viscosity
+    F += 0.*P.M.x*(avgV.xy - P.V);
+    
+    //gravity
+    F += P.M.x*vec2(0., -0.0004);
+
+        if(Mouse.z > 0.)
+    {
+        vec2 dm =(Mouse.xy - Mouse.zw*vec2(1.0,-1.0))/10.; 
+        float d = distance(Mouse.xy, P.X)/20.;
+        F += 0.001*dm*exp(-d*d);
+        // P.M.y += 0.1*exp(-40.*d*d);
+    }
+    
+    //integrate
+    P.V += F*dt/P.M.x;
+
+    //border 
+    vec3 N = bN(P.X);
+    float vdotN = step(N.z, border_h)*dot(-N.xy, P.V);
+    P.V += 0.5*(N.xy*vdotN + N.xy*abs(vdotN));
+    P.V += 0.*P.M.x*N.xy*step(abs(N.z), border_h)*exp(-N.z);
+    
+    if(N.z < 0.) P.V = vec2(0.);
+    
+    
+    //velocity limit
+    float v = length(P.V);
+    P.V /= (v > 1.)?v:1.;
+}      
+</script>
+<!-------------->
+<!--  █████   -->
+<!-- ██   ██  -->
+<!-- ███████  -->
+<!-- ██   ██  -->
+<!-- ██   ██  -->
+<!-------------->
+<script id="A" type="x-shader/x-fragment">
+void mainImage( out vec4 U, in vec2 pos )
+{
+    R = iResolution.xy; time = iTime; Mouse = iMouse;
+    ivec2 p = ivec2(pos);
+
+    vec4 data = texel(ch0, pos); 
+    
+    particle P;// = getParticle(data, pos);
+        
+    Reintegration(ch0, P, pos);
+    
+    //initial condition
+    if(iFrame < 1)
+    {
+        //random
+        vec3 rand = hash32(pos);
+        if(rand.z < 0.) 
+        {
+            P.X = pos;
+            P.V = 0.5*(rand.xy-0.5) + vec2(0., 0.);
+            P.M = vec2(mass, 0.);
+        }
+        else
+        {
+            P.X = pos;
+            P.V = vec2(0.);
+            P.M = vec2(1e-6);
+        }
+    }
+    
+    U = saveParticle(P, pos);
+}
+</script>
+<!-------------->
+<!-- ██████   -->
+<!-- ██   ██  -->
+<!-- ██████   -->
+<!-- ██   ██  -->
+<!-- ██████   -->
+<!-------------->
+<script id="B" type="x-shader/x-fragment">
+void mainImage( out vec4 U, in vec2 pos )
+{
+    R = iResolution.xy; time = iTime; Mouse = iMouse;
+    ivec2 p = ivec2(pos);
+        
+    vec4 data = texel(ch0, pos); 
+    
+    particle P = getParticle(data, pos);
+    
+    
+    if(P.M.x != 0.) //not vacuum
+    {
+        Simulation(ch0, P, pos);
+    }
+    
+    if(length(P.X - R*vec2(0.8, 0.9)) < 10.) 
+    {
+        P.X = pos;
+        P.V = 0.5*Dir(-PI*0.25 - PI*0.5 + 0.3*sin(0.4*time));
+        P.M = mix(P.M, vec2(fluid_rho, 1.), 0.4);
+    }
+
+    if(length(P.X - R*vec2(0.2, 0.9)) < 10.) 
+    {
+        P.X = pos;
+        P.V = 0.5*Dir(-PI*0.25 + 0.3*sin(0.3*time));
+        P.M = mix(P.M, vec2(fluid_rho, 0.), 0.4);
+    }
+    
+    U = saveParticle(P, pos);
+}
+</script>
+<!-------------->
+<!--  ██████  -->
+<!-- ██       -->
+<!-- ██       -->
+<!-- ██       -->
+<!--  ██████  -->
+<!-------------->
+<script id="C" type="x-shader/x-fragment">
+// density
+void mainImage( out vec4 fragColor, in vec2 pos )
+{
+    R = iResolution.xy; time = iTime;
+    ivec2 p = ivec2(pos);
+
+    vec4 data = texel(ch0, pos);
+    particle P = getParticle(data, pos);
+    
+    //particle render
+    vec4 rho = vec4(0.);
+    range(i, -1, 1) range(j, -1, 1)
+    {
+        vec2 ij = vec2(i,j);
+        vec4 data = texel(ch0, pos + ij);
+        particle P0 = getParticle(data, pos + ij);
+
+        vec2 x0 = P0.X; //update position
+        //how much mass falls into this pixel
+        rho += 1.*vec4(P.V, P.M)*G((pos - x0)/0.75); 
+    }
+    
+    fragColor = rho;
+}
+</script>
+<!-------------------------------------------------->
+<!--  ██  ███    ███   █████    ██████   ███████  --> 
+<!--  ██  ████  ████  ██   ██  ██        ██       --> 
+<!--  ██  ██ ████ ██  ███████  ██   ███  █████    --> 
+<!--  ██  ██  ██  ██  ██   ██  ██    ██  ██       --> 
+<!--  ██  ██      ██  ██   ██   ██████   ███████  -->
+<!-------------------------------------------------->
+<script id="Image" type="x-shader/x-fragment">
+vec3 hsv2rgb( in vec3 c )
+{
+    vec3 rgb = clamp( abs(mod(c.x*6.0+vec3(0.0,4.0,2.0),6.0)-3.0)-1.0, 0.0, 1.0 );
+
+    rgb = rgb*rgb*(3.0-2.0*rgb); // cubic smoothing	
+
+    return c.z * mix( vec3(1.0), rgb, c.y);
+}
+
+vec3 mixN(vec3 a, vec3 b, float k)
+{
+    return sqrt(mix(a*a, b*b, clamp(k,0.,1.)));
+}
+
+vec4 V(vec2 p)
+{
+    return pixel(ch1, p);
+}
+
+void mainImage( out vec4 col, in vec2 pos )
+{
+    R = iResolution.xy; time = iTime;
+    //pos = R*0.5 + pos*0.1;
+    ivec2 p = ivec2(pos);
+    
+    vec4 data = texel(ch0, pos);
+    particle P = getParticle(data, pos);
+    
+    //border render
+    vec3 Nb = bN(P.X);
+    float bord = smoothstep(2.*border_h,border_h*0.5,border(pos));
+    
+    vec4 rho = V(pos);
+    vec3 dx = vec3(-2., 0., 2.);
+    vec4 grad = -0.5*vec4(V(pos + dx.zy).zw - V(pos + dx.xy).zw,
+                            V(pos + dx.yz).zw - V(pos + dx.yx).zw);
+    vec2 N = pow(length(grad.xz),0.2)*normalize(grad.xz+1e-5);
+    float specular = pow(max(dot(N, Dir(1.4)), 0.), 3.5);
+    float specularb = G(0.4*(Nb.zz - border_h))*pow(max(dot(Nb.xy, Dir(1.4)), 0.), 3.);
+    
+    float a = pow(smoothstep(fluid_rho*0., fluid_rho*2., rho.z),0.1);
+    float b = exp(-1.7*smoothstep(fluid_rho*1., fluid_rho*7.5, rho.z));
+    vec3 col0 = vec3(1., 0.5, 0.);
+    vec3 col1 = vec3(0.1, 0.4, 1.);
+    vec3 fcol = mixN(col0, col1, tanh(3.*(rho.w - 0.7))*0.5 + 0.5);
+    // Output to screen
+    col = vec4(3.);
+    col.xyz = mixN(col.xyz, fcol.xyz*(1.5*b + specular*5.), a);
+    col.xyz = mixN(col.xyz, 0.*vec3(0.5,0.5,1.), bord);
+    col.xyz = tanh(col.xyz);
+}
+</script>
+<script>
+////////////////////////////////////////
+//  ███    ███   █████   ██  ███    ██
+//  ████  ████  ██   ██  ██  ████   ██
+//  ██ ████ ██  ███████  ██  ██ ██  ██
+//  ██  ██  ██  ██   ██  ██  ██  ██ ██
+//  ██      ██  ██   ██  ██  ██   ████
+var toy = new ShaderToyLite("myCanvas");
+toy.setCommon(document.getElementById("Common").innerText);
+toy.setBufferA({source: document.getElementById("A").innerText, iChannel0: "B"});
+toy.setBufferB({source: document.getElementById("B").innerText, iChannel0: "A"});
+toy.setBufferC({source: document.getElementById("C").innerText, iChannel0: "A"});
+toy.setImage({source: document.getElementById("Image").innerText, iChannel0: "A", iChannel1: "C", iChannel2: "B"});
+toy.play();
+</script>
+</body>
+</html>
