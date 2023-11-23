@@ -12,7 +12,7 @@
 ^ This demo renders [Paint Streams](https://www.shadertoy.com/view/WtfyDj) by [Michael Moroz](https://michaelmoroz.github.io/Reintegration-Tracking/)
 
 ## Features
-- direcly load *almost* any ShaderToy shaders without modification
+- direcly load any ShaderToy shaders (except sound & vr) without modification
 - pixel perfect rendering
 - supports all uniforms
 - upload your own textures
