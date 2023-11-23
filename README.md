@@ -3,7 +3,7 @@
 <img src="https://github.com/chipweinberger/ShaderToyLite.js/blob/main/logo.png?raw=true" />
 </p>
 
-**ShaderToyLite.js** is a full featured (but tiny) ShaderToy renderer, in ~400 lines of code.
+**ShaderToyLite.js** is a full featured ShaderToy renderer, in ~400 lines of code.
 
 ## Demo
 
