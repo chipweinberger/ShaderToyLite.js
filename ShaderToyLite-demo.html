@@ -870,10 +870,7 @@ void mainImage( out vec4 col, in vec2 pos )
 // on iOS, texelFetch is not supported
 // this is not a perfect solution, but at least gets something drawn
 function isMobileSafari() {
-    const userAgent = window.navigator.userAgent;
-    const isSafari = /^((?!chrome|android).)*safari/i.test(userAgent);
-    const isIOS = /iPad|iPhone|iPod/.test(userAgent) && !window.MSStream;
-    return isSafari && isIOS;
+    return /iPad|iPhone|iPod/.test(window.navigator.userAgent);
 }
 const safariShim = isMobileSafari() == false ? '' : `
 #undef texel
