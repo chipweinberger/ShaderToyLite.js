@@ -860,6 +860,30 @@ void mainImage( out vec4 col, in vec2 pos )
 }
 </script>
 <script>
+///////////////////////////////////
+// ███████  ██   ██  ██  ███    ███ 
+// ██       ██   ██  ██  ████  ████ 
+// ███████  ███████  ██  ██ ████ ██ 
+//      ██  ██   ██  ██  ██  ██  ██ 
+// ███████  ██   ██  ██  ██      ██ 
+//
+// on iOS, texelFetch is not supported
+// this is not a perfect solution, but at least gets something drawn
+function isMobileSafari() {
+    const userAgent = window.navigator.userAgent;
+    const isSafari = /^((?!chrome|android).)*safari/i.test(userAgent);
+    const isIOS = /iPad|iPhone|iPod/.test(userAgent) && !window.MSStream;
+    return isSafari && isIOS;
+}
+const safariShim = isMobileSafari() == false ? '' : `
+#undef texel
+#define texel(a, p) myTexelFetchiOS(a, Bi(p))
+vec4 myTexelFetchiOS(sampler2D tex, ivec2 coord) {
+    ivec2 texSize = ivec2(iChannelResolution[0].xy);
+    ivec2 clamped = ivec2(clamp(coord.x, 0, texSize.x - 1), clamp(coord.y, 0, texSize.y - 1));
+    vec2 norm = (vec2(clamped) + 0.5) / vec2(texSize);
+    return texture(tex, norm);
+}`;
 ////////////////////////////////////////
 //  ███    ███   █████   ██  ███    ██
 //  ████  ████  ██   ██  ██  ████   ██
@@ -867,7 +891,7 @@ void mainImage( out vec4 col, in vec2 pos )
 //  ██  ██  ██  ██   ██  ██  ██  ██ ██
 //  ██      ██  ██   ██  ██  ██   ████
 var toy = new ShaderToyLite("myCanvas");
-toy.setCommon(document.getElementById("Common").innerText);
+toy.setCommon(document.getElementById("Common").innerText + safariShim);
 toy.setBufferA({source: document.getElementById("A").innerText, iChannel0: "B"});
 toy.setBufferB({source: document.getElementById("B").innerText, iChannel0: "A"});
 toy.setBufferC({source: document.getElementById("C").innerText, iChannel0: "A"});
