@@ -11,6 +11,8 @@
 
 ^ This demo renders [Paint Streams](https://www.shadertoy.com/view/WtfyDj) by [Michael Moroz](https://michaelmoroz.github.io/Reintegration-Tracking/)
 
+**Note:** iOS has rendering artifcacts due to `texelFetch` not being fully supported
+
 ## Features
 - direcly load any ShaderToy shaders (except sound & vr) without modification
 - pixel perfect rendering
