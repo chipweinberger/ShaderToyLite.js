@@ -15,10 +15,10 @@
 
 ## Features
 - direcly load any ShaderToy shaders (except sound & vr) without modification
+- supports buffer shaders (i.e BufferA, BufferB, BufferC, BufferD)
 - pixel perfect rendering
 - supports all uniforms
 - upload your own textures
-- shader buffers (i.e BufferA, BufferB, BufferC, BufferD)
 - shader common code (i.e. 'Common' tab in ShaderToy)
 - update shaders at any time
 - uses the same texture format as ShaderToy (RGBA float32)
