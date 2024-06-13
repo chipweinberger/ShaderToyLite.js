@@ -392,11 +392,11 @@ function ShaderToyLite(canvasId) {
         flip[key] = false;
     }
     
-    this.getTime = () => {
+    this.time = () => {
         return (prevDrawTime - firstDrawTime) * 0.001;
     }
     
-    this.getIsPlaying = () => isPlaying;
+    this.isPlaying = () => isPlaying;
     
     this.reset = () => {
         var now = new Date();
