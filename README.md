@@ -54,7 +54,7 @@ toy.play();
 toy.pause();
 
 // currently playing?
-tod.getIsPlaying();
+tod.isPlaying();
 
 // reset time to zero
 toy.rewind();
