@@ -88,7 +88,7 @@ Minimal example showing multiple buffer usage.
         fragColor = vec4(col.rgb, 1.);
     }
     `;
-    var toy = new ShaderToy('myCanvas');
+    var toy = new ShaderToyLite('myCanvas');
     toy.setCommon('');
     toy.setBufferA({source: a});
     toy.setImage({source: image, iChannel0: 'A'});
