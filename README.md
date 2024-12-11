@@ -5,7 +5,7 @@
 
 **ShaderToyLite.js** is a full featured ShaderToy renderer, in ~400 lines of code.
 
-It is the rendering backend for [MidiToy](https://jamcorder.com/miditoy) ([more details](https://jamcorder.com/vfx)).
+It is the rendering backend for [MidiToy](https://jamcorder.com/miditoy), used in [Jamcorder](https://jamcorder.com) products.
 
 ## Demo
 
