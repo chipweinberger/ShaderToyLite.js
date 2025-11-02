@@ -245,7 +245,7 @@ function ShaderToyLite(canvasId) {
             }
             for (let i = 0; i < 4; i++) {
                 var s = config[`iChannel${i}`];
-                if (s == "A" || s == "B" || s == "C" || s == "D") {
+                if (s) {
                     ichannels[key][i] = s;
                 }
             }
